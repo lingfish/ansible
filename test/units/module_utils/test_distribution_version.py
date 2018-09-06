@@ -221,9 +221,31 @@ ID_LIKE="suse"
         "result": {
             "distribution_release": "",
             "distribution": "openSUSE Tumbleweed",
-            "distribution_major_version": "NA",
+            "distribution_major_version": "20160917",
             "os_family": "Suse",
             "distribution_version": "20160917"
+        }
+    },
+    {
+        "platform.dist": [
+            "",
+            "",
+            ""
+        ],
+        "input": {
+            "/etc/os-release": (
+                "NAME=\"openSUSE Leap\"\n# VERSION=\"15.0\"\nID=opensuse-leap\nID_LIKE=\"suse opensuse\"\nVERSION_ID=\"15.0\"\n"
+                "PRETTY_NAME=\"openSUSE Leap 15.0\"\nANSI_COLOR=\"0;32\"\nCPE_NAME=\"cpe:/o:opensuse:leap:15.0\"\n"
+                "BUG_REPORT_URL=\"https://bugs.opensuse.org\"\nHOME_URL=\"https://www.opensuse.org/\"\n"
+            )
+        },
+        "name": "openSUSE Leap 15.0",
+        "result": {
+            "distribution_release": "0",
+            "distribution": "openSUSE Leap",
+            "distribution_major_version": "15",
+            "os_family": "Suse",
+            "distribution_version": "15.0"
         }
     },
     {  # see https://github.com/ansible/ansible/issues/14837
@@ -403,6 +425,28 @@ DISTRIB_DESCRIPTION="SteamOS 2.0"
             'distribution_release': u'brewmaster',
             "os_family": "Debian",
             'distribution_version': u'2.0'
+        }
+    },
+    {
+        'name': "Devuan",
+        'input': {
+            '/etc/os-release': """PRETTY_NAME="Devuan GNU/Linux 1 (jessie)"
+NAME="Devuan GNU/Linux"
+VERSION_ID="1"
+VERSION="1 (jessie)"
+ID=devuan
+HOME_URL="http://www.devuan.org/"
+SUPPORT_URL="http://www.devuan.org/support/"
+BUG_REPORT_URL="https://bugs.devuan.org/"
+"""
+        },
+        'platform.dist': ('', '', ''),
+        'result': {
+            'distribution': u'Devuan',
+            'distribution_major_version': u'1',
+            'distribution_release': u'jessie',
+            'os_family': 'Debian',
+            'distribution_version': u'1'
         }
     },
     {

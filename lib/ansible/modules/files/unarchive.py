@@ -26,6 +26,7 @@ description:
      - By default, it will copy the source file from the local system to the target before unpacking.
      - Set C(remote_src=yes) to unpack an archive which already exists on the target.
      - For Windows targets, use the M(win_unzip) module instead.
+     - If checksum validation is desired, use M(get_url) or M(uri) instead to fetch the file and set C(remote_src=yes).
 options:
   src:
     description:
@@ -131,6 +132,7 @@ EXAMPLES = r'''
 import binascii
 import codecs
 import datetime
+import fnmatch
 import grp
 import os
 import platform
@@ -262,7 +264,11 @@ class ZipArchive(object):
         else:
             try:
                 for member in archive.namelist():
-                    if member not in self.excludes:
+                    if self.excludes:
+                        for exclude in self.excludes:
+                            if not fnmatch.fnmatch(member, exclude):
+                                self._files_in_archive.append(to_native(member))
+                    else:
                         self._files_in_archive.append(to_native(member))
             except:
                 archive.close()
@@ -297,22 +303,22 @@ class ZipArchive(object):
         run_gid = os.getgid()
         try:
             run_owner = pwd.getpwuid(run_uid).pw_name
-        except:
+        except (TypeError, KeyError):
             run_owner = run_uid
         try:
             run_group = grp.getgrgid(run_gid).gr_name
-        except:
+        except (KeyError, ValueError, OverflowError):
             run_group = run_gid
 
         # Get future user ownership
         fut_owner = fut_uid = None
         if self.file_args['owner']:
             try:
-                tpw = pwd.getpwname(self.file_args['owner'])
-            except:
+                tpw = pwd.getpwnam(self.file_args['owner'])
+            except KeyError:
                 try:
                     tpw = pwd.getpwuid(self.file_args['owner'])
-                except:
+                except (TypeError, KeyError):
                     tpw = pwd.getpwuid(run_uid)
             fut_owner = tpw.pw_name
             fut_uid = tpw.pw_uid
@@ -328,10 +334,10 @@ class ZipArchive(object):
         if self.file_args['group']:
             try:
                 tgr = grp.getgrnam(self.file_args['group'])
-            except:
+            except (ValueError, KeyError):
                 try:
                     tgr = grp.getgrgid(self.file_args['group'])
-                except:
+                except (KeyError, ValueError, OverflowError):
                     tgr = grp.getgrgid(run_gid)
             fut_group = tgr.gr_name
             fut_gid = tgr.gr_gid
@@ -522,7 +528,7 @@ class ZipArchive(object):
             owner = uid = None
             try:
                 owner = pwd.getpwuid(st.st_uid).pw_name
-            except:
+            except (TypeError, KeyError):
                 uid = st.st_uid
 
             # If we are not root and requested owner is not our user, fail
@@ -542,7 +548,7 @@ class ZipArchive(object):
             group = gid = None
             try:
                 group = grp.getgrgid(st.st_gid).gr_name
-            except:
+            except (KeyError, ValueError, OverflowError):
                 gid = st.st_gid
 
             if run_uid != 0 and fut_gid not in groups:
@@ -641,7 +647,7 @@ class TgzArchive(object):
         if self.opts:
             cmd.extend(['--show-transformed-names'] + self.opts)
         if self.excludes:
-            cmd.extend(['--exclude=' + quote(f) for f in self.excludes])
+            cmd.extend(['--exclude=' + f for f in self.excludes])
         cmd.extend(['-f', self.src])
         rc, out, err = self.module.run_command(cmd, cwd=self.dest, environ_update=dict(LANG='C', LC_ALL='C', LC_MESSAGES='C'))
         if rc != 0:
@@ -652,14 +658,18 @@ class TgzArchive(object):
             # filename = filename.decode('string_escape')
             filename = to_native(codecs.escape_decode(filename)[0])
 
-            if filename and filename not in self.excludes:
-                # We don't allow absolute filenames.  If the user wants to unarchive rooted in "/"
-                # they need to use "dest: '/'".  This follows the defaults for gtar, pax, etc.
-                # Allowing absolute filenames here also causes bugs: https://github.com/ansible/ansible/issues/21397
-                if filename.startswith('/'):
-                    filename = filename[1:]
+            # We don't allow absolute filenames.  If the user wants to unarchive rooted in "/"
+            # they need to use "dest: '/'".  This follows the defaults for gtar, pax, etc.
+            # Allowing absolute filenames here also causes bugs: https://github.com/ansible/ansible/issues/21397
+            if filename.startswith('/'):
+                filename = filename[1:]
 
-                self._files_in_archive.append(filename)
+            if self.excludes:
+                for exclude in self.excludes:
+                    if not fnmatch.fnmatch(filename, exclude):
+                        self._files_in_archive.append(to_native(filename))
+            else:
+                self._files_in_archive.append(to_native(filename))
 
         return self._files_in_archive
 
@@ -676,7 +686,7 @@ class TgzArchive(object):
         if self.module.params['keep_newer']:
             cmd.append('--keep-newer-files')
         if self.excludes:
-            cmd.extend(['--exclude=' + quote(f) for f in self.excludes])
+            cmd.extend(['--exclude=' + f for f in self.excludes])
         cmd.extend(['-f', self.src])
         rc, out, err = self.module.run_command(cmd, cwd=self.dest, environ_update=dict(LANG='C', LC_ALL='C', LC_MESSAGES='C'))
 
@@ -723,7 +733,7 @@ class TgzArchive(object):
         if self.module.params['keep_newer']:
             cmd.append('--keep-newer-files')
         if self.excludes:
-            cmd.extend(['--exclude=' + quote(f) for f in self.excludes])
+            cmd.extend(['--exclude=' + f for f in self.excludes])
         cmd.extend(['-f', self.src])
         rc, out, err = self.module.run_command(cmd, cwd=self.dest, environ_update=dict(LANG='C', LC_ALL='C', LC_MESSAGES='C'))
         return dict(cmd=cmd, rc=rc, out=out, err=err)
@@ -786,7 +796,6 @@ def main():
         # not checking because of daisy chain to file module
         argument_spec=dict(
             src=dict(type='path', required=True),
-            original_basename=dict(type='str'),  # used to handle 'dest is a directory' via template, a slight hack
             dest=dict(type='path', required=True),
             remote_src=dict(type='bool', default=False),
             creates=dict(type='path'),
@@ -812,8 +821,7 @@ def main():
             module.fail_json(msg="Source '%s' failed to transfer" % src)
         # If remote_src=true, and src= contains ://, try and download the file to a temp directory.
         elif '://' in src:
-            tempdir = os.path.dirname(os.path.realpath(__file__))
-            package = os.path.join(tempdir, str(src.rsplit('/', 1)[1]))
+            new_src = os.path.join(module.tmpdir, to_native(src.rsplit('/', 1)[1], errors='surrogate_or_strict'))
             try:
                 rsp, info = fetch_url(module, src)
                 # If download fails, raise a proper exception
@@ -821,7 +829,7 @@ def main():
                     raise Exception(info['msg'])
 
                 # open in binary mode for python3
-                f = open(package, 'wb')
+                f = open(new_src, 'wb')
                 # Read 1kb at a time to save on ram
                 while True:
                     data = rsp.read(BUFSIZE)
@@ -832,7 +840,7 @@ def main():
 
                     f.write(data)
                 f.close()
-                src = package
+                src = new_src
             except Exception as e:
                 module.fail_json(msg="Failure downloading %s, %s" % (src, to_native(e)))
         else:

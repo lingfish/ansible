@@ -48,9 +48,23 @@ options:
         both ARP and ICMP Echo must be disabled in order for forwarding
         virtual servers using that virtual address to forward ICMP packets.
         If (enabled), then the packets are dropped.
+      - Deprecated. Use the C(arp) parameter instead.
+      - When creating a new virtual address, if this parameter is not specified,
+        the default value is C(enabled).
     choices:
       - enabled
       - disabled
+  arp:
+    description:
+      - Specifies whether the system accepts ARP requests.
+      - When C(no), specifies that the system does not accept ARP requests.
+      - When C(yes), then the packets are dropped.
+      - Note that both ARP and ICMP Echo must be disabled in order for forwarding
+        virtual servers using that virtual address to forward ICMP packets.
+      - When creating a new virtual address, if this parameter is not specified,
+        the default value is C(yes).
+    type: bool
+    version_added: 2.7
   auto_delete:
     description:
       - Specifies whether the system automatically deletes the virtual
@@ -58,9 +72,9 @@ options:
         When C(disabled), specifies that the system leaves the virtual
         address even when all associated virtual servers have been deleted.
         When creating the virtual address, the default value is C(enabled).
-    choices:
-      - enabled
-      - disabled
+      - C(enabled) and C(disabled) are deprecated and will be removed in
+        Ansible 2.11. Instead, use known Ansible booleans such as C(yes) and
+        C(no)
   icmp_echo:
     description:
       - Specifies how the systems sends responses to (ICMP) echo requests
@@ -90,7 +104,7 @@ options:
       - absent
       - enabled
       - disabled
-  advertise_route:
+  availability_calculation:
     description:
       - Specifies what routes of the virtual address the system advertises.
         When C(when_any_available), advertises the route when any virtual
@@ -101,12 +115,46 @@ options:
       - always
       - when_all_available
       - when_any_available
+    aliases: ['advertise_route']
+    version_added: 2.6
   use_route_advertisement:
     description:
       - Specifies whether the system uses route advertisement for this
-        virtual address. When disabled, the system does not advertise
-        routes for this virtual address.
+        virtual address.
+      - When disabled, the system does not advertise routes for this virtual address.
+      - Deprecated. Use the C(route_advertisement) parameter instead.
     type: bool
+  route_advertisement:
+    description:
+      - Specifies whether the system uses route advertisement for this
+        virtual address.
+      - When disabled, the system does not advertise routes for this virtual address.
+      - The majority of these options are only supported on versions 13.0.0-HF1 or
+        higher. On versions less than this, all choices expect C(disabled) will
+        translate to C(enabled).
+      - When C(always), the BIG-IP system will always advertise the route for the
+        virtual address, regardless of availability status. This requires an C(enabled)
+        virtual address.
+      - When C(enabled), the BIG-IP system will advertise the route for the available
+        virtual address, based on the calculation method in the availability calculation.
+      - When C(disabled), the BIG-IP system will not advertise the route for the virtual
+        address, regardless of the availability status.
+      - When C(selective), you can also selectively enable ICMP echo responses, which
+        causes the BIG-IP system to internally enable or disable responses based on
+        virtual server state. Either C(any) virtual server, C(all) virtual servers, or
+        C(always), regardless of the state of any virtual server.
+      - When C(any), the BIG-IP system will advertise the route for the virtual address
+        when any virtual server is available.
+      - When C(all), the BIG-IP system will advertise the route for the virtual address
+        when all virtual servers are available.
+    choices:
+      - disabled
+      - enabled
+      - always
+      - selective
+      - any
+      - all
+    version_added: 2.6
   partition:
     description:
       - Device partition to manage resources on.
@@ -118,12 +166,27 @@ options:
         if this value is not specified, the default of C(/Common/traffic-group-1)
         will be used.
     version_added: 2.5
-notes:
-  - Requires the netaddr Python package on the host. This is as easy as pip
-    install netaddr.
+  route_domain:
+    description:
+      - The route domain of the C(address) that you want to use.
+      - This value cannot be modified after it is set.
+    version_added: 2.6
+  spanning:
+    description:
+      - Enables all BIG-IP systems in a device group to listen for and process traffic
+        on the same virtual address.
+      - Spanning for a virtual address occurs when you enable the C(spanning) option on a
+        device and then sync the virtual address to the other members of the device group.
+      - Spanning also relies on the upstream router to distribute application flows to the
+        BIG-IP systems using ECMP routes. ECMP defines a route to the virtual address using
+        distinct Floating self-IP addresses configured on each BIG-IP system.
+      - You must also configure MAC masquerade addresses and disable C(arp) on the virtual
+        address when Spanning is enabled.
+      - When creating a new virtual address, if this parameter is not specified, the default
+        valus is C(no).
+    version_added: 2.7
+    type: bool
 extends_documentation_fragment: f5
-requirements:
-  - netaddr
 author:
   - Tim Rupp (@caphrim007)
 '''
@@ -176,11 +239,11 @@ netmask:
   returned: created
   type: int
   sample: 2345
-arp_state:
+arp:
   description: The new way the virtual address handles ARP requests.
   returned: changed
-  type: string
-  sample: disabled
+  type: bool
+  sample: yes
 address:
   description: The address of the virtual address.
   returned: created
@@ -191,12 +254,18 @@ state:
   returned: changed
   type: string
   sample: disabled
+spanning:
+  description: Whether spanning is enabled or not
+  returned: changed
+  type: string
+  sample: disabled
 '''
 
 from ansible.module_utils.basic import AnsibleModule
 from ansible.module_utils.basic import env_fallback
 from ansible.module_utils.parsing.convert_bool import BOOLEANS_TRUE
 from ansible.module_utils.parsing.convert_bool import BOOLEANS_FALSE
+from distutils.version import LooseVersion
 
 try:
     from library.module_utils.network.f5.bigip import HAS_F5SDK
@@ -206,6 +275,7 @@ try:
     from library.module_utils.network.f5.common import cleanup_tokens
     from library.module_utils.network.f5.common import fq_name
     from library.module_utils.network.f5.common import f5_argument_spec
+    from library.module_utils.network.f5.ipaddress import is_valid_ip
     try:
         from library.module_utils.network.f5.common import iControlUnexpectedHTTPError
     except ImportError:
@@ -218,54 +288,73 @@ except ImportError:
     from ansible.module_utils.network.f5.common import cleanup_tokens
     from ansible.module_utils.network.f5.common import fq_name
     from ansible.module_utils.network.f5.common import f5_argument_spec
+    from ansible.module_utils.network.f5.ipaddress import is_valid_ip
     try:
         from ansible.module_utils.network.f5.common import iControlUnexpectedHTTPError
     except ImportError:
         HAS_F5SDK = False
 
-try:
-    import netaddr
-    HAS_NETADDR = True
-except ImportError:
-    HAS_NETADDR = False
-
 
 class Parameters(AnsibleF5Parameters):
     api_map = {
-        'routeAdvertisement': 'use_route_advertisement',
+        'routeAdvertisement': 'route_advertisement_type',
         'autoDelete': 'auto_delete',
         'icmpEcho': 'icmp_echo',
         'connectionLimit': 'connection_limit',
-        'serverScope': 'advertise_route',
+        'serverScope': 'availability_calculation',
         'mask': 'netmask',
-        'arp': 'arp_state',
         'trafficGroup': 'traffic_group',
     }
 
     updatables = [
-        'use_route_advertisement', 'auto_delete', 'icmp_echo', 'connection_limit',
-        'arp_state', 'enabled', 'advertise_route', 'traffic_group', 'address'
+        'route_advertisement_type',
+        'auto_delete',
+        'icmp_echo',
+        'connection_limit',
+        'arp',
+        'enabled',
+        'availability_calculation',
+        'traffic_group',
+        'spanning',
     ]
 
     returnables = [
-        'use_route_advertisement', 'auto_delete', 'icmp_echo', 'connection_limit',
-        'netmask', 'arp_state', 'address', 'state', 'traffic_group'
+        'route_advertisement_type',
+        'auto_delete',
+        'icmp_echo',
+        'connection_limit',
+        'netmask',
+        'arp',
+        'address',
+        'state',
+        'traffic_group',
+        'route_domain',
+        'spanning',
     ]
 
     api_attributes = [
-        'routeAdvertisement', 'autoDelete', 'icmpEcho', 'connectionLimit',
-        'advertiseRoute', 'arp', 'mask', 'enabled', 'serverScope', 'trafficGroup'
+        'routeAdvertisement',
+        'autoDelete',
+        'icmpEcho',
+        'connectionLimit',
+        'advertiseRoute',
+        'arp',
+        'mask',
+        'enabled',
+        'serverScope',
+        'trafficGroup',
+        'spanning',
     ]
 
     @property
-    def advertise_route(self):
-        if self._values['advertise_route'] is None:
+    def availability_calculation(self):
+        if self._values['availability_calculation'] is None:
             return None
-        elif self._values['advertise_route'] in ['any', 'when_any_available']:
+        elif self._values['availability_calculation'] in ['any', 'when_any_available']:
             return 'any'
-        elif self._values['advertise_route'] in ['all', 'when_all_available']:
+        elif self._values['availability_calculation'] in ['all', 'when_all_available']:
             return 'all'
-        elif self._values['advertise_route'] in ['none', 'always']:
+        elif self._values['availability_calculation'] in ['none', 'always']:
             return 'none'
 
     @property
@@ -273,17 +362,6 @@ class Parameters(AnsibleF5Parameters):
         if self._values['connection_limit'] is None:
             return None
         return int(self._values['connection_limit'])
-
-    @property
-    def use_route_advertisement(self):
-        if self._values['use_route_advertisement'] is None:
-            return None
-        elif self._values['use_route_advertisement'] in BOOLEANS_TRUE:
-            return 'enabled'
-        elif self._values['use_route_advertisement'] == 'enabled':
-            return 'enabled'
-        else:
-            return 'disabled'
 
     @property
     def enabled(self):
@@ -299,25 +377,12 @@ class Parameters(AnsibleF5Parameters):
             return None
 
     @property
-    def address(self):
-        if self._values['address'] is None:
-            return None
-        try:
-            ip = netaddr.IPAddress(self._values['address'])
-            return str(ip)
-        except netaddr.core.AddrFormatError:
-            raise F5ModuleError(
-                "The provided 'address' is not a valid IP address"
-            )
-
-    @property
     def netmask(self):
         if self._values['netmask'] is None:
             return None
-        try:
-            ip = netaddr.IPAddress(self._values['netmask'])
-            return str(ip)
-        except netaddr.core.AddrFormatError:
+        if is_valid_ip(self._values['netmask']):
+            return self._values['netmask']
+        else:
             raise F5ModuleError(
                 "The provided 'netmask' is not a valid IP address"
             )
@@ -355,6 +420,39 @@ class Parameters(AnsibleF5Parameters):
                 "Traffic groups can only exist in /Common"
             )
 
+    @property
+    def route_advertisement_type(self):
+        if self.use_route_advertisement:
+            return self.use_route_advertisement
+        elif self.route_advertisement:
+            return self.route_advertisement
+        else:
+            return self._values['route_advertisement_type']
+
+    @property
+    def use_route_advertisement(self):
+        if self._values['use_route_advertisement'] is None:
+            return None
+        if self._values['use_route_advertisement'] in BOOLEANS_TRUE:
+            return 'enabled'
+        elif self._values['use_route_advertisement'] == 'enabled':
+            return 'enabled'
+        else:
+            return 'disabled'
+
+    @property
+    def route_advertisement(self):
+        if self._values['route_advertisement'] is None:
+            return None
+        version = self.client.api.tmos_version
+        if LooseVersion(version) <= LooseVersion('13.0.0'):
+            if self._values['route_advertisement'] == 'disabled':
+                return 'disabled'
+            else:
+                return 'enabled'
+        else:
+            return self._values['route_advertisement']
+
     def to_return(self):
         result = {}
         for returnable in self.returnables:
@@ -364,15 +462,78 @@ class Parameters(AnsibleF5Parameters):
 
 
 class ApiParameters(Parameters):
-    pass
+    @property
+    def arp(self):
+        if self._values['arp'] is None:
+            return None
+        elif self._values['arp'] == 'enabled':
+            return True
+        return False
+
+    @property
+    def spanning(self):
+        if self._values['spanning'] is None:
+            return None
+        if self._values['spanning'] == 'enabled':
+            return True
+        return False
 
 
 class ModuleParameters(Parameters):
     @property
+    def arp(self):
+        if self._values['arp'] is None:
+            if self.arp_state and self.arp_state == 'enabled':
+                return True
+            elif self.arp_state and self.arp_state == 'disabled':
+                return False
+        else:
+            return self._values['arp']
+
+    @property
+    def address(self):
+        if self._values['address'] is None:
+            return None
+        if is_valid_ip(self._values['address']):
+            return self._values['address']
+        else:
+            raise F5ModuleError(
+                "The provided 'address' is not a valid IP address"
+            )
+
+    @property
+    def route_domain(self):
+        if self._values['route_domain'] is None:
+            return None
+        try:
+            return int(self._values['route_domain'])
+        except ValueError:
+            try:
+                rd = self.client.api.tm.net.route_domains.route_domain.load(
+                    name=self._values['route_domain'],
+                    partition=self.partition
+                )
+                return int(rd.id)
+            except iControlUnexpectedHTTPError:
+                raise F5ModuleError(
+                    "The specified 'route_domain' was not found."
+                )
+
+    @property
+    def full_address(self):
+        if self.route_domain is not None:
+            return '{0}%{1}'.format(self.address, self.route_domain)
+        return self.address
+
+    @property
     def name(self):
         if self._values['name'] is None:
-            return str(self.address)
-        return self._values['name']
+            result = str(self.address)
+            if self.route_domain:
+                result = "{0}%{1}".format(result, self.route_domain)
+        else:
+            result = self._values['name']
+        return result
 
 
 class Changes(Parameters):
@@ -380,11 +541,40 @@ class Changes(Parameters):
 
 
 class UsableChanges(Changes):
-    pass
+    @property
+    def address(self):
+        if self._values['address'] is None:
+            return None
+        if self._values['route_domain'] is None:
+            return self._values['address']
+        result = "{0}%{1}".format(self._values['address'], self._values['route_domain'])
+        return result
+
+    @property
+    def arp(self):
+        if self._values['arp'] is None:
+            return None
+        elif self._values['arp'] is True:
+            return 'enabled'
+        elif self._values['arp'] is False:
+            return 'disabled'
+
+    @property
+    def spanning(self):
+        if self._values['spanning'] is None:
+            return None
+        if self._values['spanning']:
+            return 'enabled'
+        return 'disabled'
 
 
 class ReportableChanges(Changes):
-    pass
+    @property
+    def arp(self):
+        if self._values['arp'] == 'disabled':
+            return 'no'
+        elif self._values['arp'] == 'enabled':
+            return 'yes'
 
 
 class Difference(object):
@@ -412,6 +602,20 @@ class Difference(object):
     def traffic_group(self):
         if self.want.traffic_group != self.have.traffic_group:
             return self.want.traffic_group
+
+    @property
+    def spanning(self):
+        if self.want.spanning is None:
+            return None
+        if self.want.spanning != self.have.spanning:
+            return self.want.spanning
+
+    @property
+    def arp_state(self):
+        if self.want.arp_state is None:
+            return None
+        if self.want.arp_state != self.have.arp_state:
+            return self.want.arp_state
 
 
 class ModuleManager(object):
@@ -485,16 +689,23 @@ class ModuleManager(object):
         return changed
 
     def read_current_from_device(self):
+        name = self.want.name
+        name = name.replace('%', '%25')
         resource = self.client.api.tm.ltm.virtual_address_s.virtual_address.load(
-            name=self.want.name,
+            name=name,
             partition=self.want.partition
         )
         result = resource.attrs
         return ApiParameters(params=result)
 
     def exists(self):
+        # This addresses cases where the name includes a % sign. The URL in the REST
+        # API escapes a % sign as %25. If you don't do this, you will get errors in
+        # the exists() method.
+        name = self.want.name
+        name = name.replace('%', '%25')
         result = self.client.api.tm.ltm.virtual_address_s.virtual_address.exists(
-            name=self.want.name,
+            name=name,
             partition=self.want.partition
         )
         return result
@@ -508,11 +719,16 @@ class ModuleManager(object):
                     "the virtual address if you need to do this."
                 )
         if self.want.address is not None:
-            if self.have.address != self.want.address:
+            if self.have.address != self.want.full_address:
                 raise F5ModuleError(
                     "The address cannot be changed. Delete and recreate "
                     "the virtual address if you need to do this."
                 )
+        if self.changes.arp and self.changes.spanning:
+            raise F5ModuleError(
+                "'arp' and 'spanning' cannot both be enabled on virtual address."
+            )
+
         if not self.should_update():
             return False
         if self.module.check_mode:
@@ -522,16 +738,28 @@ class ModuleManager(object):
 
     def update_on_device(self):
         params = self.changes.api_params()
+        name = self.want.name
+        name = name.replace('%', '%25')
         resource = self.client.api.tm.ltm.virtual_address_s.virtual_address.load(
-            name=self.want.name,
+            name=name,
             partition=self.want.partition
         )
         resource.modify(**params)
 
     def create(self):
         self._set_changed_options()
+
         if self.want.traffic_group is None:
             self.want.update({'traffic_group': '/Common/traffic-group-1'})
+        if self.want.arp is None:
+            self.want.update({'arp': True})
+        if self.want.spanning is None:
+            self.want.update({'spanning': False})
+
+        if self.want.arp and self.want.spanning:
+            raise F5ModuleError(
+                "'arp' and 'spanning' cannot both be enabled on virtual address."
+            )
         if self.module.check_mode:
             return True
         self.create_on_device()
@@ -545,7 +773,7 @@ class ModuleManager(object):
         self.client.api.tm.ltm.virtual_address_s.virtual_address.create(
             name=self.want.name,
             partition=self.want.partition,
-            address=self.want.address,
+            address=self.changes.address,
             **params
         )
 
@@ -558,8 +786,10 @@ class ModuleManager(object):
         return True
 
     def remove_from_device(self):
+        name = self.want.name
+        name = name.replace('%', '%25')
         resource = self.client.api.tm.ltm.virtual_address_s.virtual_address.load(
-            name=self.want.name,
+            name=name,
             partition=self.want.partition
         )
         resource.delete()
@@ -582,32 +812,55 @@ class ArgumentSpec(object):
             connection_limit=dict(
                 type='int'
             ),
-            arp_state=dict(
-                choices=['enabled', 'disabled'],
-            ),
-            auto_delete=dict(
-                choices=['enabled', 'disabled'],
-            ),
+
+            auto_delete=dict(),
             icmp_echo=dict(
                 choices=['enabled', 'disabled', 'selective'],
             ),
-            advertise_route=dict(
+            availability_calculation=dict(
                 choices=['always', 'when_all_available', 'when_any_available'],
-            ),
-            use_route_advertisement=dict(
-                type='bool'
+                aliases=['advertise_route']
             ),
             traffic_group=dict(),
             partition=dict(
                 default='Common',
                 fallback=(env_fallback, ['F5_PARTITION'])
-            )
+            ),
+            route_domain=dict(),
+            spanning=dict(type='bool'),
+
+            # Deprecated pair - route advertisement
+            use_route_advertisement=dict(
+                type='bool',
+                removed_in_version=2.9,
+            ),
+            route_advertisement=dict(
+                choices=[
+                    'disabled',
+                    'enabled',
+                    'always',
+                    'selective',
+                    'any',
+                    'all',
+                ]
+            ),
+
+            # Deprecated pair - ARP
+            arp_state=dict(
+                choices=['enabled', 'disabled'],
+                removed_in_version=2.11,
+            ),
+            arp=dict(type='bool'),
         )
         self.argument_spec = {}
         self.argument_spec.update(f5_argument_spec)
         self.argument_spec.update(argument_spec)
         self.required_one_of = [
             ['name', 'address']
+        ]
+        self.mutually_exclusive = [
+            ['use_route_advertisement', 'route_advertisement'],
+            ['arp_state', 'arp']
         ]
 
 
@@ -620,8 +873,6 @@ def main():
     )
     if not HAS_F5SDK:
         module.fail_json(msg="The python f5-sdk module is required")
-    if not HAS_NETADDR:
-        module.fail_json(msg="The python netaddr module is required")
 
     try:
         client = F5Client(**module.params)

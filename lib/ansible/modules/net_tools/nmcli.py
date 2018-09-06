@@ -58,7 +58,7 @@ options:
         description:
             - This is the type of device or network connection that you wish to create for a bond, team or bridge.
         choices: [ "balance-rr", "active-backup", "balance-xor", "broadcast", "802.3ad", "balance-tlb", "balance-alb" ]
-        default: balence-rr
+        default: balance-rr
     master:
         description:
             - master <master (ifname, or connection UUID or conn_name) of bridge, team, bond master connection profile.
@@ -627,7 +627,7 @@ class Nmcli(object):
         try:
             proxy = bus.get_object(service_name, "/org/freedesktop/NetworkManager/Settings")
             settings = dbus.Interface(proxy, "org.freedesktop.NetworkManager.Settings")
-        except dbus.Exceptions.DBusException as e:
+        except dbus.exceptions.DBusException as e:
             self.module.fail_json(msg="Unable to read Network Manager settings from DBus system bus: %s" % to_native(e),
                                   details="Please check if NetworkManager is installed and"
                                           " service network-manager is started.")

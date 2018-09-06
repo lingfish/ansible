@@ -59,11 +59,51 @@ You can combine lookups with :ref:`playbooks_filters`, :ref:`playbooks_tests` an
 
   tasks:
     - name: valid but useless and over complicated chained lookups and filters
-      debug: msg="find the answer here:\n{{ lookup('url', 'http://google.com/search/?q=' + item|urlencode)|join(' ') }}"
+      debug: msg="find the answer here:\n{{ lookup('url', 'https://google.com/search/?q=' + item|urlencode)|join(' ') }}"
       with_nested:
         - "{{lookup('consul_kv', 'bcs/' + lookup('file', '/the/question') + ', host=localhost, port=2000')|shuffle}}"
         - "{{lookup('sequence', 'end=42 start=2 step=2')|map('log', 4)|list)}}"
         - ['a', 'c', 'd', 'c']
+
+.. versionadded:: 2.6
+
+You can now control how errors behave in all lookup plugins by setting ``errors`` to ``ignore``, ``warn``, or ``strict``. The default setting is ``strict``, which causes the task to fail. For example:
+
+To ignore errors::
+
+    - name: file doesnt exist, but i dont care .. file plugin itself warns anyways ...
+      debug: msg="{{ lookup('file', '/idontexist', errors='ignore') }}"
+
+    [WARNING]: Unable to find '/idontexist' in expected paths (use -vvvvv to see paths)
+
+    ok: [localhost] => {
+        "msg": ""
+    }
+
+
+To get a warning instead of a failure::
+
+    - name: file doesnt exist, let me know, but continue
+      debug: msg="{{ lookup('file', '/idontexist', errors='warn') }}"
+
+    [WARNING]: Unable to find '/idontexist' in expected paths (use -vvvvv to see paths)
+
+    [WARNING]: An unhandled exception occurred while running the lookup plugin 'file'. Error was a <class 'ansible.errors.AnsibleError'>, original message: could not locate file in lookup: /idontexist
+
+    ok: [localhost] => {
+        "msg": ""
+    }
+
+
+Fatal error (the default)::
+
+    - name: file doesnt exist, FAIL (this is the default)
+      debug: msg="{{ lookup('file', '/idontexist', errors='strict') }}"
+
+    [WARNING]: Unable to find '/idontexist' in expected paths (use -vvvvv to see paths)
+
+    fatal: [localhost]: FAILED! => {"msg": "An unhandled exception occurred while running the lookup plugin 'file'. Error was a <class 'ansible.errors.AnsibleError'>, original message: could not locate file in lookup: /idontexist"}
+
 
 .. _query:
 
@@ -117,7 +157,7 @@ You can use ``ansible-doc -t lookup -l`` to see the list of available plugins. U
        Jinja2 test plugins
    :ref:`playbooks_lookups`
        Jinja2 lookup plugins
-   `User Mailing List <http://groups.google.com/group/ansible-devel>`_
+   `User Mailing List <https://groups.google.com/group/ansible-devel>`_
        Have a question?  Stop by the google group!
    `irc.freenode.net <http://irc.freenode.net>`_
        #ansible IRC chat channel

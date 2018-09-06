@@ -26,6 +26,7 @@ notes:
     - Doesn't download the key unless it really needs it.
     - As a sanity check, downloaded key id must match the one specified.
     - Best practice is to specify the key id and the URL.
+    - Adding a new key requires an apt cache update (e.g. using the apt module's update_cache option)
 options:
     id:
         description:
@@ -41,7 +42,7 @@ options:
             - The path to a keyfile on the remote server to add to the keyring.
     keyring:
         description:
-            - The path to specific keyring file in /etc/apt/trusted.gpg.d/
+            - The full path to specific keyring file in /etc/apt/trusted.gpg.d/
         version_added: "1.3"
     url:
         description:

@@ -133,11 +133,14 @@ ansible_facts:
         }
         "default": {
             "array_name": "flasharray1",
+            "connected_arrays": 1,
             "hostgroups": 0,
             "hosts": 10,
+            "pods": 3,
             "protection_groups": 1,
             "purity_version": "5.0.4",
-            "snapshots": 1
+            "snapshots": 1,
+            "volume_groups": 2
         }
         "hgroups": {}
         "hosts": {
@@ -278,6 +281,7 @@ ansible_facts:
         "subnet": {}
         "volumes": {
             "ansible_data": {
+                "bandwidth": null,
                 "hosts": [
                     [
                         "host1",
@@ -285,7 +289,8 @@ ansible_facts:
                     ]
                 ],
                 "serial": "43BE47C12334399B000114A6",
-                "size": 1099511627776
+                "size": 1099511627776,
+                "source": null
             }
         }
 '''
@@ -305,8 +310,9 @@ def generate_default_dict(array):
     defaults = array.get()
     api_version = array._list_available_rest_versions()
     if AC_REQUIRED_API_VERSION in api_version:
-        pods = array.get_pods()
-        default_facts['pods'] = len(pods)
+        default_facts['volume_groups'] = len(array.list_vgroups())
+        default_facts['connected_arrays'] = len(array.list_array_connections())
+        default_facts['pods'] = len(array.list_pods())
     hosts = array.list_hosts()
     snaps = array.list_volumes(snap=True, pending=True)
     pgroups = array.list_pgroups(pending=True)
@@ -446,10 +452,27 @@ def generate_vol_dict(array):
     for vol in range(0, len(vols)):
         volume = vols[vol]['name']
         volume_facts[volume] = {
+            'source': vols[vol]['source'],
             'size': vols[vol]['size'],
             'serial': vols[vol]['serial'],
-            'hosts': []
+            'hosts': [],
+            'bandwidth': ""
         }
+    api_version = array._list_available_rest_versions()
+    if AC_REQUIRED_API_VERSION in api_version:
+        qvols = array.list_volumes(qos=True)
+        for qvol in range(0, len(qvols)):
+            volume = qvols[qvol]['name']
+            qos = qvols[qvol]['bandwidth_limit']
+            volume_facts[volume]['bandwidth'] = qos
+        vvols = array.list_volumes(protocol_endpoint=True)
+        for vvol in range(0, len(vvols)):
+            volume = vvols[vvol]['name']
+            volume_facts[volume] = {
+                'source': vols[vol]['source'],
+                'serial': vols[vol]['serial'],
+                'hosts': []
+            }
     cvols = array.list_volumes(connect=True)
     for cvol in range(0, len(cvols)):
         volume = cvols[cvol]['name']
@@ -537,7 +560,7 @@ def main():
     subset_test = (test in valid_subsets for test in subset)
     if not all(subset_test):
         module.fail_json(msg="value must gather_subset must be one or more of: %s, got: %s"
-                             % (",".join(valid_subsets), ",".join(subset)))
+                         % (",".join(valid_subsets), ",".join(subset)))
 
     facts = {}
 
@@ -569,6 +592,7 @@ def main():
     result = dict(ansible_purefa_facts=facts,)
 
     module.exit_json(**result)
+
 
 if __name__ == '__main__':
     main()

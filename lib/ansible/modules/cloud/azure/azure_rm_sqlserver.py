@@ -46,6 +46,14 @@ options:
         description:
             - "The identity type. Set this to 'SystemAssigned' in order to automatically create and assign an Azure Active Directory principal for the resour
                ce. Possible values include: 'SystemAssigned'"
+    state:
+        description:
+            - Assert the state of the SQL server. Use 'present' to create or update a server and
+              'absent' to delete a server.
+        default: present
+        choices:
+            - absent
+            - present
 
 extends_documentation_fragment:
     - azure
@@ -157,7 +165,6 @@ class AzureRMServers(AzureRMModuleBase):
         self.parameters = dict()
 
         self.results = dict(changed=False)
-        self.mgmt_client = None
         self.state = None
         self.to_do = Actions.NoAction
 
@@ -186,9 +193,6 @@ class AzureRMServers(AzureRMModuleBase):
         old_response = None
         response = None
         results = dict()
-
-        self.mgmt_client = self.get_mgmt_svc_client(SqlManagementClient,
-                                                    base_url=self._cloud_environment.endpoints.resource_manager)
 
         resource_group = self.get_resource_group(self.resource_group)
 
@@ -260,9 +264,9 @@ class AzureRMServers(AzureRMModuleBase):
         self.log("Creating / Updating the SQL Server instance {0}".format(self.name))
 
         try:
-            response = self.mgmt_client.servers.create_or_update(self.resource_group,
-                                                                 self.name,
-                                                                 self.parameters)
+            response = self.sql_client.servers.create_or_update(self.resource_group,
+                                                                self.name,
+                                                                self.parameters)
             if isinstance(response, AzureOperationPoller):
                 response = self.get_poller_result(response)
 
@@ -279,8 +283,8 @@ class AzureRMServers(AzureRMModuleBase):
         '''
         self.log("Deleting the SQL Server instance {0}".format(self.name))
         try:
-            response = self.mgmt_client.servers.delete(self.resource_group,
-                                                       self.name)
+            response = self.sql_client.servers.delete(self.resource_group,
+                                                      self.name)
         except CloudError as e:
             self.log('Error attempting to delete the SQL Server instance.')
             self.fail("Error deleting the SQL Server instance: {0}".format(str(e)))
@@ -296,8 +300,8 @@ class AzureRMServers(AzureRMModuleBase):
         self.log("Checking if the SQL Server instance {0} is present".format(self.name))
         found = False
         try:
-            response = self.mgmt_client.servers.get(self.resource_group,
-                                                    self.name)
+            response = self.sql_client.servers.get(self.resource_group,
+                                                   self.name)
             found = True
             self.log("Response : {0}".format(response))
             self.log("SQL Server instance : {0} found".format(response.name))
@@ -312,6 +316,7 @@ class AzureRMServers(AzureRMModuleBase):
 def main():
     """Main execution"""
     AzureRMServers()
+
 
 if __name__ == '__main__':
     main()

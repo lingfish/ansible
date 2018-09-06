@@ -78,7 +78,7 @@ author:
 EXAMPLES = r'''
 - name: Disable the setup utility
   bigip_sys_global:
-    gui_setup: disabled
+    gui_setup: no
     password: secret
     server: lb.mydomain.com
     user: admin
@@ -93,9 +93,9 @@ banner_text:
   type: string
   sample: This is a corporate device. Do not touch.
 console_timeout:
-  description: >
-    The new number of seconds of inactivity before the system
-    logs off a user that is logged on.
+  description:
+    - The new number of seconds of inactivity before the system
+      logs off a user that is logged on.
   returned: changed
   type: int
   sample: 600
@@ -103,36 +103,36 @@ gui_setup:
   description: The new setting for the Setup utility.
   returned: changed
   type: string
-  sample: enabled
+  sample: yes
 lcd_display:
   description: The new setting for displaying the system menu on the LCD.
   returned: changed
   type: string
-  sample: enabled
+  sample: yes
 mgmt_dhcp:
   description: The new setting for whether the mgmt interface should DHCP or not.
   returned: changed
   type: string
-  sample: enabled
+  sample: yes
 net_reboot:
   description: The new setting for whether the system should boot to an ISO on the network or not.
   returned: changed
   type: string
-  sample: enabled
+  sample: yes
 quiet_boot:
-  description: >
-    The new setting for whether the system should suppress information to
-    the console during boot or not.
+  description:
+    - The new setting for whether the system should suppress information to
+      the console during boot or not.
   returned: changed
   type: string
-  sample: enabled
+  sample: yes
 security_banner:
-  description: >
-    The new setting for whether the system should display an advisory message
-    on the login screen or not.
+  description:
+    - The new setting for whether the system should display an advisory message
+      on the login screen or not.
   returned: changed
   type: string
-  sample: enabled
+  sample: yes
 '''
 
 from ansible.module_utils.basic import AnsibleModule
@@ -383,26 +383,25 @@ class ArgumentSpec(object):
     def __init__(self):
         self.supports_check_mode = True
         self.states = ['present']
-        self.on_off_choices = ['enabled', 'disabled', 'True', 'False'] + list(BOOLEANS)
         argument_spec = dict(
             security_banner=dict(
-                choices=self.on_off_choices
+                type='bool'
             ),
             banner_text=dict(),
             gui_setup=dict(
-                choices=self.on_off_choices
+                type='bool'
             ),
             lcd_display=dict(
-                choices=self.on_off_choices
+                type='bool'
             ),
             mgmt_dhcp=dict(
-                choices=self.on_off_choices
+                type='bool'
             ),
             net_reboot=dict(
-                choices=self.on_off_choices
+                type='bool'
             ),
             quiet_boot=dict(
-                choices=self.on_off_choices
+                type='bool'
             ),
             console_timeout=dict(required=False, type='int', default=None),
             state=dict(default='present', choices=['present'])

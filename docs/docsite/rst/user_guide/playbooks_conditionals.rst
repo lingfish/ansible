@@ -22,7 +22,7 @@ Sometimes you will want to skip a particular step on a particular host.
 This could be something as simple as not installing a certain package if the operating system is a particular version,
 or it could be something like performing some cleanup steps if a filesystem is getting full.
 
-This is easy to do in Ansible with the `when` clause, which contains a raw Jinja2 expression without double curly braces (see :doc:`playbooks_variables`).
+This is easy to do in Ansible with the `when` clause, which contains a raw Jinja2 expression without double curly braces (see :ref:`group_by_module`).
 It's actually pretty simple::
 
     tasks:
@@ -49,7 +49,7 @@ Multiple conditions that all need to be true (a logical 'and') can also be speci
           - ansible_distribution == "CentOS"
           - ansible_distribution_major_version == "6"
 
-A number of Jinja2 "filters" can also be used in when statements, some of which are unique
+A number of Jinja2 "tests" and "filters" can also be used in when statements, some of which are unique
 and provided by Ansible.  Suppose we want to ignore the error of one statement and then
 decide to do something conditionally based on success or failure::
 
@@ -173,15 +173,17 @@ Or with a role::
            when: ansible_os_family == 'Debian'
 
 You will note a lot of 'skipped' output by default in Ansible when using this approach on systems that don't match the criteria.
-Read up on the 'group_by' module in the :doc:`modules` docs for a more streamlined way to accomplish the same thing.
+In many cases the ``group_by`` module (see :doc:`modules`) can be a more streamlined way to accomplish the same thing; see
+:ref:`os_variance`.
 
-When used with `include_*` tasks instead of imports, the conditional is applied _only_ to the include task itself and not any other
-tasks within the included file(s). A common situation where this distinction is important is as follows::
+When a conditional is used with ``include_*`` tasks instead of imports, it is applied `only` to the include task itself and not
+to any other tasks within the included file(s). A common situation where this distinction is important is as follows::
 
-    # include a file to define a variable when it is not already defined
+    # We wish to include a file to define a variable when it is not
+    # already defined
 
     # main.yml
-    - include_tasks: other_tasks.yml
+    - import_tasks: other_tasks.yml # note "import"
       when: x is not defined
 
     # other_tasks.yml
@@ -190,8 +192,19 @@ tasks within the included file(s). A common situation where this distinction is 
     - debug:
         var: x
 
-In the above example, if ``import_tasks`` had been used instead both included tasks would have also been skipped. With ``include_tasks``
-instead, the tasks are executed as expected because the conditional is not applied to them.
+This expands at include time to the equivalent of::
+
+    - set_fact:
+        x: foo
+      when: x is not defined
+    - debug:
+        var: x
+      when: x is not defined
+
+Thus if ``x`` is initially undefined, the ``debug`` task will be skipped.  By using ``include_tasks`` instead of ``import_tasks``,
+both tasks from ``other_tasks.yml`` will be executed as expected.
+
+For more information on the differences between ``include`` v ``import`` see :ref:`playbooks_reuse`.
 
 .. _conditional_imports:
 
@@ -337,6 +350,7 @@ Possible values::
     ClearLinux
     Coreos
     Debian
+    Fedora
     Gentoo
     Mandriva
     NA
@@ -392,7 +406,7 @@ Possible values::
        Best practices in playbooks
    :ref:`playbooks_variables`
        All about variables
-   `User Mailing List <http://groups.google.com/group/ansible-devel>`_
+   `User Mailing List <https://groups.google.com/group/ansible-devel>`_
        Have a question?  Stop by the google group!
    `irc.freenode.net <http://irc.freenode.net>`_
        #ansible IRC chat channel
